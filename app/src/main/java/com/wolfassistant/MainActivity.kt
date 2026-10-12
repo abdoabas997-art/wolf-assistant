@@ -36,7 +36,7 @@ class MainActivity : Activity() {
 
         root.addView(
             title,
-            Linea98rLayout.LayoutParams(
+            LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )
