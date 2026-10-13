@@ -4,8 +4,10 @@ package com.wolfassistant
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.Color
@@ -19,7 +21,6 @@ import android.speech.tts.TextToSpeech
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
@@ -52,10 +53,23 @@ class MainActivity : Activity() {
     private var recognizer: SpeechRecognizer? = null
     private var tts: TextToSpeech? = null
     private var continuousListening = false
-    private var listening = false
     private var readReplies = false
     private var lastAssistantReply = ""
     private var chatScreenOpen = false
+    private var receiverRegistered = false
+
+    private val voiceReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != "com.wolfassistant.VOICE_RESULT") return
+
+            val spoken = intent.getStringExtra("spoken_text")
+            if (!spoken.isNullOrBlank() && chatScreenOpen) {
+                input.setText(spoken)
+                input.setSelection(input.text.length)
+                sendMessage()
+            }
+        }
+    }
 
     private fun dp(value: Int): Int =
         (value * resources.displayMetrics.density).toInt()
@@ -74,8 +88,7 @@ class MainActivity : Activity() {
             val owners = state.getBooleanArray("chat_owners")
 
             if (texts != null && owners != null) {
-                val count = minOf(texts.size, owners.size)
-                for (i in 0 until count) {
+                for (i in 0 until minOf(texts.size, owners.size)) {
                     messageTexts.add(texts[i])
                     messageOwners.add(owners[i])
                 }
@@ -87,48 +100,40 @@ class MainActivity : Activity() {
 
         tts = TextToSpeech(this) { result ->
             if (result == TextToSpeech.SUCCESS) {
-                tts?.language = Locale("ar", "EG")
+                val languageResult = tts?.setLanguage(Locale("ar", "EG"))
+                if (languageResult == TextToSpeech.LANG_MISSING_DATA ||
+                    languageResult == TextToSpeech.LANG_NOT_SUPPORTED
+                ) {
+                    tts?.language = Locale.getDefault()
+                }
             }
         }
 
+        registerVoiceReceiver()
         showHome()
     }
 
+    private fun registerVoiceReceiver() {
+        if (receiverRegistered) return
+
+        val filter = IntentFilter("com.wolfassistant.VOICE_RESULT")
+
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(voiceReceiver, filter, RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(voiceReceiver, filter)
+        }
+
+        receiverRegistered = true
+    }
+
     private fun createRoot(): LinearLayout {
-        val root = LinearLayout(this).apply {
+        return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(bg)
-            setPadding(dp(16), dp(8), dp(16), dp(8))
+            setPadding(dp(16), dp(10), dp(16), dp(10))
         }
-
-        root.setOnApplyWindowInsetsListener { view, insets ->
-            val top: Int
-            val bottom: Int
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                val bars = insets.getInsets(
-                    WindowInsets.Type.systemBars()
-                )
-                top = bars.top
-                bottom = bars.bottom
-            } else {
-                @Suppress("DEPRECATION")
-                run {
-                    top = insets.systemWindowInsetTop
-                    bottom = insets.systemWindowInsetBottom
-                }
-            }
-
-            view.setPadding(
-                dp(16),
-                top + dp(8),
-                dp(16),
-                bottom + dp(8)
-            )
-            insets
-        }
-
-        return root
     }
 
     private fun makeText(
@@ -152,10 +157,8 @@ class MainActivity : Activity() {
             setTextColor(Color.WHITE)
             minWidth = 0
             minimumWidth = 0
-            setPadding(dp(5), dp(3), dp(5), dp(3))
-            setBackgroundTintList(
-                ColorStateList.valueOf(accent)
-            )
+            setPadding(dp(4), dp(3), dp(4), dp(3))
+            backgroundTintList = ColorStateList.valueOf(accent)
         }
     }
 
@@ -163,7 +166,7 @@ class MainActivity : Activity() {
         emoji: String,
         title: String,
         description: String,
-        onClick: () -> Unit
+        action: () -> Unit
     ): Button {
         return Button(this).apply {
             text = "$emoji  $title\n\n$description"
@@ -173,44 +176,78 @@ class MainActivity : Activity() {
             setTextColor(Color.WHITE)
             minWidth = 0
             minimumWidth = 0
-            setPadding(dp(8), dp(8), dp(8), dp(8))
+            setPadding(dp(6), dp(6), dp(6), dp(6))
             background = GradientDrawable().apply {
                 setColor(panel)
                 cornerRadius = dp(16).toFloat()
                 setStroke(dp(1), border)
             }
-            setOnClickListener { onClick() }
+            setOnClickListener { action() }
         }
     }
 
     private fun addDivider(parent: LinearLayout) {
-        val line = View(this).apply {
-            setBackgroundColor(Color.rgb(55, 70, 95))
-        }
         parent.addView(
-            line,
+            View(this).apply {
+                setBackgroundColor(Color.rgb(55, 70, 95))
+            },
             LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(1)
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(1)
             )
         )
     }
 
-    // الشاشة الرئيسية
+    private fun addMenuRow(
+        parent: LinearLayout,
+        first: Button,
+        second: Button
+    ) {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+
+        row.addView(
+            first,
+            LinearLayout.LayoutParams(0, dp(118), 1f).apply {
+                marginEnd = dp(5)
+                bottomMargin = dp(8)
+            }
+        )
+        row.addView(
+            second,
+            LinearLayout.LayoutParams(0, dp(118), 1f).apply {
+                marginStart = dp(5)
+                bottomMargin = dp(8)
+            }
+        )
+        parent.addView(row)
+    }
+
     private fun showHome() {
         chatScreenOpen = false
         val root = createRoot()
 
-        val title = makeText("🐺 مساعد الذئب", 28f)
-        title.setPadding(0, dp(12), 0, dp(4))
-        root.addView(title)
-
-        val subtitle = makeText(
-            "مساعدك الشخصي الذكي",
-            15f,
-            Color.rgb(160, 190, 225)
+        root.addView(
+            makeText("🐺 مساعد الذئب", 28f),
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(58)
+            )
         )
-        subtitle.setPadding(0, 0, 0, dp(12))
-        root.addView(subtitle)
+
+        root.addView(
+            makeText(
+                "مساعدك الشخصي الذكي",
+                15f,
+                Color.rgb(160, 190, 225)
+            ),
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(35)
+            )
+        )
 
         addDivider(root)
 
@@ -219,101 +256,57 @@ class MainActivity : Activity() {
             setPadding(0, dp(12), 0, dp(8))
         }
 
-        val greeting = TextView(this).apply {
-            text = "أهلًا بك! 🐺\nماذا تريد أن أفعل اليوم؟"
-            textSize = 19f
-            setTextColor(Color.WHITE)
-            gravity = Gravity.CENTER
-            setPadding(dp(8), dp(12), dp(8), dp(16))
-        }
-        content.addView(greeting)
-
-        fun addMenuRow(
-            first: Button,
-            second: Button
-        ) {
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER
-            }
-
-            row.addView(
-                first,
-                LinearLayout.LayoutParams(0, dp(125), 1f).apply {
-                    marginEnd = dp(6)
-                    bottomMargin = dp(10)
-                }
+        content.addView(
+            makeText("أهلًا بك! 🐺\nماذا تريد أن أفعل اليوم؟", 19f),
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(90)
             )
-            row.addView(
-                second,
-                LinearLayout.LayoutParams(0, dp(125), 1f).apply {
-                    marginStart = dp(6)
-                    bottomMargin = dp(10)
-                }
-            )
-            content.addView(row)
-        }
+        )
 
         addMenuRow(
-            makeMenuButton(
-                "💬",
-                "المحادثة الذكية",
-                "اكتب وتحدث مع الذئب"
-            ) {
+            content,
+            makeMenuButton("💬", "المحادثة", "اكتب رسالتك") {
                 showChat()
             },
-            makeMenuButton(
-                "🎙️",
-                "الأوامر الصوتية",
-                "تحدث بصوتك"
-            ) {
+            makeMenuButton("🎙️", "التحدث بالصوت", "اضغط وتحدث") {
                 showChat()
                 startVoiceWithPermission()
             }
         )
 
         addMenuRow(
-            makeMenuButton(
-                "🧠",
-                "الذاكرة",
-                "إدارة المعلومات المحفوظة"
-            ) {
-                showComingSoon("الذاكرة")
+            content,
+            makeMenuButton("👂", "الاستماع المستمر", "بإذنك فقط") {
+                showChat()
+                requestContinuousListening()
             },
-            makeMenuButton(
-                "📱",
-                "التحكم بالهاتف",
-                "اختصارات بإذنك"
-            ) {
-                showComingSoon("التحكم بالهاتف")
+            makeMenuButton("🧠", "الذاكرة", "إدارة المعلومات") {
+                showInfo("الذاكرة", "إضافة الذاكرة الدائمة ستكون في مرحلة لاحقة.")
             }
         )
 
         addMenuRow(
-            makeMenuButton(
-                "📋",
-                "المهام والأوامر",
-                "إدارة مهامك اليومية"
-            ) {
-                showComingSoon("المهام والأوامر")
+            content,
+            makeMenuButton("📱", "التحكم بالهاتف", "بصلاحياتك") {
+                showInfo("التحكم بالهاتف", "سنضيف أوامر الهاتف تدريجيًا مع طلب الإذن قبل تنفيذ الإجراءات.")
             },
-            makeMenuButton(
-                "⚙️",
-                "الإعدادات",
-                "خيارات الصوت والتطبيق"
-            ) {
+            makeMenuButton("⚙️", "الإعدادات", "الصوت والتطبيق") {
                 showSettings()
             }
         )
 
-        val footer = TextView(this).apply {
-            text = "الإصدار التجريبي • بعض الوظائف قيد التطوير"
-            textSize = 12f
-            setTextColor(Color.rgb(155, 170, 195))
-            gravity = Gravity.CENTER
-            setPadding(0, dp(8), 0, dp(8))
-        }
-        content.addView(footer)
+        content.addView(
+            makeText(
+                "نسخة تجريبية • التطوير مستمر",
+                12f,
+                Color.rgb(155, 170, 195)
+            ),
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(36)
+            )
+        )
 
         val pageScroll = ScrollView(this).apply {
             isFillViewport = true
@@ -323,21 +316,19 @@ class MainActivity : Activity() {
         root.addView(
             pageScroll,
             LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1f
             )
         )
 
         setContentView(root)
-        root.requestApplyInsets()
     }
 
-    private fun showComingSoon(feature: String) {
+    private fun showInfo(title: String, message: String) {
         AlertDialog.Builder(this)
-            .setTitle(feature)
-            .setMessage(
-                "وظيفة $feature موجودة في خطة تطوير مساعد الذئب، " +
-                    "لكنها لم تُفعّل بعد. سنضيفها تدريجيًا."
-            )
+            .setTitle(title)
+            .setMessage(message)
             .setPositiveButton("حسنًا", null)
             .show()
     }
@@ -360,82 +351,66 @@ class MainActivity : Activity() {
                         } else if (lastAssistantReply.isNotEmpty()) {
                             speak(lastAssistantReply)
                         }
-                        AlertDialog.Builder(this)
-                            .setMessage(
-                                if (readReplies)
-                                    "قراءة الردود الصوتية مفعّلة."
-                                else
-                                    "قراءة الردود الصوتية متوقفة."
-                            )
-                            .setPositiveButton("حسنًا", null)
-                            .show()
+                        showInfo(
+                            "الصوت",
+                            if (readReplies) "قراءة الردود مفعّلة."
+                            else "قراءة الردود متوقفة."
+                        )
                     }
 
                     1 -> speak("أهلًا بك، أنا مساعد الذئب.")
-                    2 -> AlertDialog.Builder(this)
-                        .setTitle("مساعد الذئب")
-                        .setMessage(
-                            "نسخة تجريبية من مساعدك الشخصي. " +
-                                "المحادثة الحالية تستخدم ردودًا محلية " +
-                                "إلى أن نربط خادم الذكاء الاصطناعي."
-                        )
-                        .setPositiveButton("حسنًا", null)
-                        .show()
+                    2 -> showInfo(
+                        "مساعد الذئب",
+                        "هذه نسخة تجريبية. الردود الحالية محلية، وربط الذكاء الاصطناعي بالخادم خطوة لاحقة."
+                    )
                 }
             }
             .setNegativeButton("إغلاق", null)
             .show()
     }
 
-    // شاشة المحادثة الحالية
     private fun showChat() {
         chatScreenOpen = true
         val root = createRoot()
 
-        val headerRow = LinearLayout(this).apply {
+        val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
 
         val backButton = makeButton("‹ الرئيسية")
-        headerRow.addView(
+        header.addView(
             backButton,
-            LinearLayout.LayoutParams(
-                dp(105), dp(46)
-            )
+            LinearLayout.LayoutParams(dp(105), dp(46))
         )
 
-        val title = makeText("🐺 مساعد الذئب", 22f)
-        headerRow.addView(
-            title,
+        header.addView(
+            makeText("🐺 مساعد الذئب", 21f),
             LinearLayout.LayoutParams(0, dp(46), 1f)
         )
-        root.addView(headerRow)
+        root.addView(header)
 
-        status = makeText(
-            "● جاهز للمساعدة",
-            13f,
-            Color.rgb(100, 220, 160)
-        )
-        status.setPadding(0, dp(4), 0, dp(8))
+        status = makeText("● جاهز للمساعدة", 13f, Color.rgb(100, 220, 160))
+        status.setPadding(0, dp(5), 0, dp(8))
         root.addView(status)
         addDivider(root)
-
-        scroll = ScrollView(this).apply {
-            isFillViewport = true
-            clipToPadding = false
-        }
 
         messages = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(0, dp(10), 0, dp(10))
         }
 
-        scroll.addView(messages)
+        scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(messages)
+        }
+
         root.addView(
             scroll,
             LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1f
             )
         )
 
@@ -464,15 +439,12 @@ class MainActivity : Activity() {
         sendRow.addView(
             input,
             LinearLayout.LayoutParams(0, dp(54), 1f).apply {
-                marginEnd = dp(8)
+                marginEnd = dp(7)
             }
         )
 
         val sendButton = makeButton("إرسال")
-        sendRow.addView(
-            sendButton,
-            LinearLayout.LayoutParams(dp(82), dp(54))
-        )
+        sendRow.addView(sendButton, LinearLayout.LayoutParams(dp(82), dp(54)))
         root.addView(sendRow)
 
         val voiceRow = LinearLayout(this).apply {
@@ -510,25 +482,25 @@ class MainActivity : Activity() {
         root.addView(
             readButton,
             LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(44)
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(43)
             ).apply {
                 topMargin = dp(4)
             }
         )
 
         setContentView(root)
-        root.requestApplyInsets()
 
         backButton.setOnClickListener {
-            stopListening()
+            stopContinuousListening()
+            stopSingleListening()
             tts?.stop()
             showHome()
         }
 
         if (messageTexts.isEmpty()) {
             addMessage(
-                "أهلًا بك! أنا مساعد الذئب 🐺\n\n" +
-                    "يمكنك الكتابة أو استخدام الميكروفون للتحدث معي.",
+                "أهلًا بك! أنا مساعد الذئب 🐺\n\nيمكنك الكتابة أو الضغط على زر التحدث. ويمكنك تشغيل الاستماع المستمر بإذنك.",
                 false
             )
         } else {
@@ -556,26 +528,15 @@ class MainActivity : Activity() {
 
         continuousButton.setOnClickListener {
             if (continuousListening) {
-                stopListening()
+                stopContinuousListening()
             } else {
-                AlertDialog.Builder(this)
-                    .setTitle("الاستماع المستمر")
-                    .setMessage(
-                        "هل تسمح لمساعد الذئب بالاستماع المتكرر " +
-                            "عبر الميكروفون؟ يمكنك إيقافه في أي وقت."
-                    )
-                    .setNegativeButton("إلغاء", null)
-                    .setPositiveButton("أوافق") { _, _ ->
-                        continuousListening = true
-                        updateContinuousButton()
-                        startVoiceWithPermission()
-                    }
-                    .show()
+                requestContinuousListening()
             }
         }
 
         stopButton.setOnClickListener {
-            stopListening()
+            stopSingleListening()
+            stopContinuousListening()
             tts?.stop()
             setStatus("تم إيقاف الاستماع والصوت")
         }
@@ -595,35 +556,88 @@ class MainActivity : Activity() {
         }
     }
 
-    override fun onSaveInstanceState(outState: Bundle) {
-        super.onSaveInstanceState(outState)
-        outState.putStringArrayList(
-            "chat_texts", ArrayList(messageTexts)
-        )
-        outState.putBooleanArray(
-            "chat_owners",
-            BooleanArray(messageOwners.size) { messageOwners[it] }
-        )
-        outState.putBoolean("read_replies", readReplies)
-        outState.putString("last_reply", lastAssistantReply)
+    private fun requestContinuousListening() {
+        AlertDialog.Builder(this)
+            .setTitle("الاستماع المستمر")
+            .setMessage(
+                "سيستخدم مساعد الذئب الميكروفون بصورة متكررة أثناء تشغيل الخدمة، وسيظهر إشعار دائم به زر لإيقافها. هل توافق؟"
+            )
+            .setNegativeButton("إلغاء", null)
+            .setPositiveButton("أوافق") { _, _ ->
+                startContinuousWithPermission()
+            }
+            .show()
     }
 
-    private fun startVoiceWithPermission() {
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            setStatus("خدمة التعرف على الصوت غير متاحة على جهازك")
-            return
-        }
-
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
-            != PackageManager.PERMISSION_GRANTED
+    private fun startContinuousWithPermission() {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
+            PackageManager.PERMISSION_GRANTED
         ) {
             requestPermissions(
-                arrayOf(Manifest.permission.RECORD_AUDIO), 101
+                arrayOf(Manifest.permission.RECORD_AUDIO),
+                101
             )
             return
         }
 
-        startListening()
+        startContinuousService()
+    }
+
+    private fun startContinuousService() {
+        try {
+            val intent = Intent(this, VoiceAssistantService::class.java)
+                .setAction(VoiceAssistantService.ACTION_START)
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+
+            continuousListening = true
+            updateContinuousButton()
+            setStatus("الاستماع المستمر قيد التشغيل")
+        } catch (_: Exception) {
+            continuousListening = false
+            updateContinuousButton()
+            setStatus("تعذر تشغيل الاستماع المستمر")
+        }
+    }
+
+    private fun stopContinuousListening() {
+        continuousListening = false
+
+        try {
+            val intent = Intent(this, VoiceAssistantService::class.java)
+                .setAction(VoiceAssistantService.ACTION_STOP)
+            startService(intent)
+        } catch (_: Exception) {
+        }
+
+        if (::continuousButton.isInitialized) {
+            updateContinuousButton()
+        }
+
+        setStatus("الاستماع المستمر متوقف")
+    }
+
+    private fun startVoiceWithPermission() {
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            setStatus("خدمة التعرف على الصوت غير متاحة")
+            return
+        }
+
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(
+                arrayOf(Manifest.permission.RECORD_AUDIO),
+                102
+            )
+            return
+        }
+
+        startSingleListening()
     }
 
     override fun onRequestPermissionsResult(
@@ -632,82 +646,92 @@ class MainActivity : Activity() {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(
-            requestCode, permissions, grantResults
+            requestCode,
+            permissions,
+            grantResults
         )
 
-        if (requestCode == 101) {
-            if (grantResults.isNotEmpty() &&
-                grantResults[0] == PackageManager.PERMISSION_GRANTED
-            ) {
-                startListening()
-            } else {
-                continuousListening = false
-                updateContinuousButton()
-                setStatus("لم يتم السماح باستخدام الميكروفون")
+        val granted = grantResults.isNotEmpty() &&
+            grantResults[0] == PackageManager.PERMISSION_GRANTED
+
+        when (requestCode) {
+            101 -> {
+                if (granted) {
+                    startContinuousService()
+                } else {
+                    setStatus("لم يتم السماح باستخدام الميكروفون")
+                }
+            }
+
+            102 -> {
+                if (granted) {
+                    startSingleListening()
+                } else {
+                    setStatus("لم يتم السماح باستخدام الميكروفون")
+                }
             }
         }
     }
 
-    private fun startListening() {
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
-            != PackageManager.PERMISSION_GRANTED
+    private fun startSingleListening() {
+        if (continuousListening) {
+            setStatus("أوقف الاستماع المستمر أولًا لاستخدام التحدث المنفرد")
+            return
+        }
+
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
+            PackageManager.PERMISSION_GRANTED
         ) return
+
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            setStatus("خدمة التعرف على الصوت غير متاحة")
+            return
+        }
 
         try {
             recognizer?.destroy()
             recognizer = SpeechRecognizer.createSpeechRecognizer(this)
 
-            recognizer?.setRecognitionListener(
-                object : RecognitionListener {
-                    override fun onReadyForSpeech(params: Bundle?) {
-                        listening = true
-                        setStatus("🎙️ أستمع إليك الآن...")
-                    }
-
-                    override fun onBeginningOfSpeech() {
-                        setStatus("🎙️ تفضل، أنا أستمع")
-                    }
-
-                    override fun onEndOfSpeech() {
-                        listening = false
-                        setStatus("جارٍ فهم كلامك...")
-                    }
-
-                    override fun onResults(results: Bundle?) {
-                        listening = false
-
-                        val spoken = results?.getStringArrayList(
-                            SpeechRecognizer.RESULTS_RECOGNITION
-                        )?.firstOrNull()
-
-                        if (!spoken.isNullOrBlank() && chatScreenOpen) {
-                            input.setText(spoken)
-                            sendMessage()
-                        }
-
-                        restartContinuousIfNeeded()
-                    }
-
-                    override fun onError(error: Int) {
-                        listening = false
-                        if (continuousListening && chatScreenOpen) {
-                            setStatus("الاستماع مستمر...")
-                            restartContinuousIfNeeded()
-                        } else {
-                            setStatus(
-                                "لم أتعرف على الكلام، حاول مرة أخرى"
-                            )
-                        }
-                    }
-
-                    override fun onRmsChanged(rmsdB: Float) {}
-                    override fun onBufferReceived(buffer: ByteArray?) {}
-                    override fun onPartialResults(partialResults: Bundle?) {}
-                    override fun onEvent(eventType: Int, params: Bundle?) {}
+            recognizer?.setRecognitionListener(object : RecognitionListener {
+                override fun onReadyForSpeech(params: Bundle?) {
+                    setStatus("🎙️ أستمع إليك الآن...")
                 }
-            )
 
-            val intent = Intent(
+                override fun onBeginningOfSpeech() {
+                    setStatus("تفضل، أنا أستمع")
+                }
+
+                override fun onEndOfSpeech() {
+                    setStatus("جارٍ فهم كلامك...")
+                }
+
+                override fun onResults(results: Bundle?) {
+                    val spoken = results?.getStringArrayList(
+                        SpeechRecognizer.RESULTS_RECOGNITION
+                    )?.firstOrNull()
+
+                    if (!spoken.isNullOrBlank() && chatScreenOpen) {
+                        input.setText(spoken)
+                        sendMessage()
+                    } else {
+                        setStatus("لم أتعرف على الكلام")
+                    }
+
+                    stopSingleListening()
+                }
+
+                override fun onError(error: Int) {
+                    setStatus("لم أتعرف على الكلام، حاول مرة أخرى")
+                    stopSingleListening()
+                }
+
+                override fun onRmsChanged(rmsdB: Float) {}
+                override fun onBufferReceived(buffer: ByteArray?) {}
+                override fun onPartialResults(partialResults: Bundle?) {}
+                override fun onEvent(eventType: Int, params: Bundle?) {}
+            })
+
+            val speechIntent = Intent(
                 RecognizerIntent.ACTION_RECOGNIZE_SPEECH
             ).apply {
                 putExtra(
@@ -716,49 +740,34 @@ class MainActivity : Activity() {
                 )
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ar-EG")
                 putExtra(
-                    RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "ar-EG"
+                    RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE,
+                    "ar-EG"
                 )
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             }
 
-            recognizer?.startListening(intent)
+            recognizer?.startListening(speechIntent)
         } catch (_: Exception) {
             setStatus("تعذر تشغيل الميكروفون")
         }
     }
 
-    private fun restartContinuousIfNeeded() {
-        if (continuousListening && chatScreenOpen) {
-            window.decorView.postDelayed({
-                if (continuousListening && chatScreenOpen && !listening) {
-                    startListening()
-                }
-            }, 800)
-        } else {
-            setStatus("● جاهز للمساعدة")
-        }
-    }
-
-    private fun stopListening() {
-        continuousListening = false
-        listening = false
-
+    private fun stopSingleListening() {
         try {
             recognizer?.cancel()
+            recognizer?.destroy()
         } catch (_: Exception) {
         }
-
-        if (::continuousButton.isInitialized) {
-            updateContinuousButton()
-        }
-        setStatus("● جاهز للمساعدة")
+        recognizer = null
     }
 
     private fun updateContinuousButton() {
-        continuousButton.text = if (continuousListening) {
-            "👂 الاستماع المستمر: يعمل"
-        } else {
-            "👂 استماع مستمر: متوقف"
+        if (::continuousButton.isInitialized) {
+            continuousButton.text = if (continuousListening) {
+                "👂 الاستماع المستمر: يعمل"
+            } else {
+                "👂 استماع مستمر: متوقف"
+            }
         }
     }
 
@@ -766,7 +775,7 @@ class MainActivity : Activity() {
         val text = input.text.toString().trim()
         if (text.isEmpty()) return
 
-        addMessage("أنت: $text", true)
+        addMessage("أنت:\n$text", true)
         input.setText("")
 
         val imm = getSystemService(
@@ -782,19 +791,27 @@ class MainActivity : Activity() {
 
             normalized.contains("مرحبا") ||
                 normalized.contains("أهلا") ||
+                normalized.contains("اهلا") ||
                 normalized.contains("السلام") ->
                 "أهلًا بك! كيف أقدر أساعدك؟"
 
-            normalized.contains("الوقت") ->
+            normalized.contains("الوقت") ||
+                normalized.contains("الساعة") ->
                 "الوقت الحالي على جهازك: " +
                     SimpleDateFormat(
-                        "hh:mm a", Locale.getDefault()
+                        "hh:mm a",
+                        Locale.getDefault()
                     ).format(Date())
 
+            normalized.contains("حالة الاستماع") ->
+                if (continuousListening) {
+                    "الاستماع المستمر قيد التشغيل."
+                } else {
+                    "الاستماع المستمر متوقف."
+                }
+
             else ->
-                "وصلتني رسالتك. الواجهة تعمل بنجاح، " +
-                    "لكن الردود الذكية تحتاج إلى ربط التطبيق " +
-                    "بخادم الذكاء الاصطناعي."
+                "وصلتني رسالتك. أنا أستقبل النص والصوت، لكن الردود الذكية الكاملة تحتاج إلى ربط خادم الذكاء الاصطناعي."
         }
 
         lastAssistantReply = reply
@@ -823,7 +840,10 @@ class MainActivity : Activity() {
     private fun addMessage(text: String, isUser: Boolean) {
         messageTexts.add(text)
         messageOwners.add(isUser)
-        renderMessage(text, isUser)
+
+        if (chatScreenOpen && ::messages.isInitialized) {
+            renderMessage(text, isUser)
+        }
     }
 
     private fun renderMessage(text: String, isUser: Boolean) {
@@ -831,6 +851,7 @@ class MainActivity : Activity() {
             this.text = text
             textSize = 16f
             setTextColor(Color.WHITE)
+            gravity = Gravity.START
             setPadding(dp(16), dp(12), dp(16), dp(12))
             background = GradientDrawable().apply {
                 setColor(
@@ -852,15 +873,31 @@ class MainActivity : Activity() {
         }
 
         messages.addView(bubble, params)
+        scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
+    }
 
-        scroll.post {
-            scroll.fullScroll(View.FOCUS_DOWN)
-        }
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+
+        outState.putStringArrayList(
+            "chat_texts",
+            ArrayList(messageTexts)
+        )
+
+        outState.putBooleanArray(
+            "chat_owners",
+            BooleanArray(messageOwners.size) {
+                messageOwners[it]
+            }
+        )
+
+        outState.putBoolean("read_replies", readReplies)
+        outState.putString("last_reply", lastAssistantReply)
     }
 
     override fun onBackPressed() {
         if (chatScreenOpen) {
-            stopListening()
+            stopSingleListening()
             tts?.stop()
             showHome()
         } else {
@@ -869,14 +906,19 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
-        try {
-            recognizer?.cancel()
-            recognizer?.destroy()
-        } catch (_: Exception) {
-        }
+        stopSingleListening()
 
         tts?.stop()
         tts?.shutdown()
+
+        if (receiverRegistered) {
+            try {
+                unregisterReceiver(voiceReceiver)
+            } catch (_: Exception) {
+            }
+            receiverRegistered = false
+        }
+
         super.onDestroy()
     }
 }
