@@ -11,6 +11,7 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.Color
+import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
@@ -44,8 +45,10 @@ class MainActivity : Activity() {
     private lateinit var input: EditText
     private lateinit var scroll: ScrollView
     private lateinit var status: TextView
-    private lateinit var continuousButton: Button
-    private lateinit var readButton: Button
+
+    private var continuousButton: Button? = null
+    private var readButton: Button? = null
+    private var voiceControls: View? = null
 
     private val messageTexts = ArrayList<String>()
     private val messageOwners = ArrayList<Boolean>()
@@ -57,7 +60,6 @@ class MainActivity : Activity() {
     private var lastAssistantReply = ""
     private var chatScreenOpen = false
     private var receiverRegistered = false
-    private var singleListening = false
 
     private val voiceReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -85,8 +87,9 @@ class MainActivity : Activity() {
         )
 
         savedInstanceState?.let { state ->
-            state.getStringArrayList("chat_texts")
-                ?.let { messageTexts.addAll(it) }
+            state.getStringArrayList("chat_texts")?.let {
+                messageTexts.addAll(it)
+            }
 
             state.getBooleanArray("chat_owners")?.let { owners ->
                 owners.forEach { messageOwners.add(it) }
@@ -116,11 +119,7 @@ class MainActivity : Activity() {
         chatScreenOpen =
             savedInstanceState?.getBoolean("chat_screen_open", false) == true
 
-        if (chatScreenOpen) {
-            showChat()
-        } else {
-            showHome()
-        }
+        if (chatScreenOpen) showChat() else showHome()
     }
 
     private fun registerVoiceReceiver() {
@@ -129,11 +128,7 @@ class MainActivity : Activity() {
         val filter = IntentFilter("com.wolfassistant.VOICE_RESULT")
 
         if (Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(
-                voiceReceiver,
-                filter,
-                RECEIVER_NOT_EXPORTED
-            )
+            registerReceiver(voiceReceiver, filter, RECEIVER_NOT_EXPORTED)
         } else {
             @Suppress("DEPRECATION")
             registerReceiver(voiceReceiver, filter)
@@ -146,58 +141,64 @@ class MainActivity : Activity() {
         val horizontal = dp(16)
         val vertical = dp(10)
 
-        return LinearLayout(this).apply {
+        val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(bg)
             setPadding(horizontal, vertical, horizontal, vertical)
+        }
 
-            setOnApplyWindowInsetsListener { view, insets ->
-                val left: Int
-                val top: Int
-                val right: Int
-                val bottom: Int
+        root.setOnApplyWindowInsetsListener { view, insets ->
+            var left = 0
+            var top = 0
+            var right = 0
+            var bottom = 0
+            var keyboardVisible = false
 
-                if (Build.VERSION.SDK_INT >= 30) {
-                    val bars = insets.getInsets(
-                        android.view.WindowInsets.Type.systemBars()
-                    )
-                    left = bars.left
-                    top = bars.top
-                    right = bars.right
-                    bottom = bars.bottom
-                } else {
-                    @Suppress("DEPRECATION")
-                    val l = insets.systemWindowInsetLeft
-
-                    @Suppress("DEPRECATION")
-                    val t = insets.systemWindowInsetTop
-
-                    @Suppress("DEPRECATION")
-                    val r = insets.systemWindowInsetRight
-
-                    @Suppress("DEPRECATION")
-                    val b = insets.systemWindowInsetBottom
-
-                    left = l
-                    top = t
-                    right = r
-                    bottom = b
-                }
-
-                view.setPadding(
-                    horizontal + left,
-                    vertical + top,
-                    horizontal + right,
-                    vertical + bottom
+            if (Build.VERSION.SDK_INT >= 30) {
+                val bars = insets.getInsets(
+                    android.view.WindowInsets.Type.systemBars()
+                )
+                val ime = insets.getInsets(
+                    android.view.WindowInsets.Type.ime()
                 )
 
-                insets
+                left = bars.left
+                top = bars.top
+                right = bars.right
+                bottom = maxOf(bars.bottom, ime.bottom)
+
+                keyboardVisible = insets.isVisible(
+                    android.view.WindowInsets.Type.ime()
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                run {
+                    left = insets.systemWindowInsetLeft
+                    top = insets.systemWindowInsetTop
+                    right = insets.systemWindowInsetRight
+                    bottom = insets.systemWindowInsetBottom
+                }
             }
 
-            if (Build.VERSION.SDK_INT >= 20) {
-                requestApplyInsets()
-            }
+            view.setPadding(
+                horizontal + left,
+                vertical + top,
+                horizontal + right,
+                vertical + bottom
+            )
+
+            // Give the keyboard priority: keep the message field and
+            // send button visible while temporarily hiding extra controls.
+            voiceControls?.visibility =
+                if (keyboardVisible) View.GONE else View.VISIBLE
+            readButton?.visibility =
+                if (keyboardVisible) View.GONE else View.VISIBLE
+
+            insets
         }
+
+        root.post { root.requestApplyInsets() }
+        return root
     }
 
     private fun makeText(
@@ -295,6 +296,9 @@ class MainActivity : Activity() {
 
     private fun showHome() {
         chatScreenOpen = false
+        voiceControls = null
+        readButton = null
+        continuousButton = null
 
         val root = createRoot()
 
@@ -353,7 +357,7 @@ class MainActivity : Activity() {
             ) {
                 showInfo(
                     "التحكم بالهاتف",
-                    "سنضيف أوامر الهاتف تدريجيًا مع طلب الإذن قبل تنفيذ الإجراءات."
+                    "سنضيف أوامر الهاتف تدريجيًا، مع طلب الإذن قبل تنفيذ الإجراءات."
                 )
             },
             makeMenuButton(
@@ -429,8 +433,7 @@ class MainActivity : Activity() {
                     2 -> showInfo(
                         "مساعد الذئب",
                         "هذه نسخة تجريبية. الردود الحالية محلية، " +
-                            "ونهدف إلى تشغيل الذكاء الاصطناعي محليًا " +
-                            "على الهاتف في مرحلة لاحقة إذا سمحت إمكاناته."
+                            "والذكاء الاصطناعي المحلي سيكون مرحلة لاحقة."
                     )
                 }
             }
@@ -453,6 +456,7 @@ class MainActivity : Activity() {
                 setOnClickListener {
                     stopSingleListening()
                     tts?.stop()
+                    hideKeyboard()
                     showHome()
                 }
             },
@@ -484,6 +488,7 @@ class MainActivity : Activity() {
 
         scroll = ScrollView(this).apply {
             isFillViewport = true
+            descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
             addView(messages)
         }
 
@@ -557,7 +562,7 @@ class MainActivity : Activity() {
         )
 
         voiceRow.addView(
-            continuousButton,
+            continuousButton!!,
             LinearLayout.LayoutParams(0, dp(46), 1.45f).apply {
                 marginEnd = dp(4)
             }
@@ -568,6 +573,7 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams(0, dp(46), .8f)
         )
 
+        voiceControls = voiceRow
         root.addView(voiceRow)
 
         readButton = makeButton(
@@ -579,13 +585,14 @@ class MainActivity : Activity() {
         )
 
         root.addView(
-            readButton,
+            readButton!!,
             LinearLayout.LayoutParams(-1, dp(43)).apply {
                 topMargin = dp(4)
             }
         )
 
         setContentView(root)
+        root.requestApplyInsets()
 
         if (messageTexts.isEmpty()) {
             addMessage(
@@ -623,7 +630,7 @@ class MainActivity : Activity() {
             startVoiceWithPermission()
         }
 
-        continuousButton.setOnClickListener {
+        continuousButton?.setOnClickListener {
             if (continuousListening) {
                 stopContinuousListening()
             } else {
@@ -638,10 +645,10 @@ class MainActivity : Activity() {
             setStatus("تم إيقاف الاستماع والصوت")
         }
 
-        readButton.setOnClickListener {
+        readButton?.setOnClickListener {
             readReplies = !readReplies
 
-            readButton.text = if (readReplies) {
+            readButton?.text = if (readReplies) {
                 "🔊 قراءة الردود: مفعّلة"
             } else {
                 "🔊 قراءة الردود: متوقفة"
@@ -653,6 +660,16 @@ class MainActivity : Activity() {
                 tts?.stop()
             }
         }
+    }
+
+    private fun hideKeyboard() {
+        if (!::input.isInitialized) return
+
+        val imm = getSystemService(
+            Context.INPUT_METHOD_SERVICE
+        ) as InputMethodManager
+
+        imm.hideSoftInputFromWindow(input.windowToken, 0)
     }
 
     private fun requestContinuousListening() {
@@ -805,8 +822,6 @@ class MainActivity : Activity() {
 
         try {
             stopSingleListening()
-            singleListening = true
-
             recognizer = SpeechRecognizer.createSpeechRecognizer(this)
 
             recognizer?.setRecognitionListener(
@@ -830,10 +845,9 @@ class MainActivity : Activity() {
                             )
                             ?.firstOrNull()
 
-                        singleListening = false
-
                         if (!spoken.isNullOrBlank() && chatScreenOpen) {
                             input.setText(spoken)
+                            input.setSelection(input.text.length)
                             sendMessage()
                         } else {
                             setStatus("لم أتعرف على الكلام")
@@ -843,7 +857,6 @@ class MainActivity : Activity() {
                     }
 
                     override fun onError(error: Int) {
-                        singleListening = false
                         setStatus("لم أتعرف على الكلام، حاول مرة أخرى")
                         stopSingleListening()
                     }
@@ -872,14 +885,12 @@ class MainActivity : Activity() {
 
             recognizer?.startListening(speechIntent)
         } catch (_: Exception) {
-            singleListening = false
             setStatus("تعذر تشغيل الميكروفون")
+            stopSingleListening()
         }
     }
 
     private fun stopSingleListening() {
-        singleListening = false
-
         try {
             recognizer?.cancel()
             recognizer?.destroy()
@@ -890,12 +901,10 @@ class MainActivity : Activity() {
     }
 
     private fun updateContinuousButton() {
-        if (::continuousButton.isInitialized) {
-            continuousButton.text = if (continuousListening) {
-                "👂 الاستماع المستمر: يعمل"
-            } else {
-                "👂 الاستماع المستمر: متوقف"
-            }
+        continuousButton?.text = if (continuousListening) {
+            "👂 الاستماع المستمر: يعمل"
+        } else {
+            "👂 الاستماع المستمر: متوقف"
         }
     }
 
@@ -905,12 +914,7 @@ class MainActivity : Activity() {
 
         addMessage("أنت:\n$text", true)
         input.setText("")
-
-        val imm = getSystemService(
-            Context.INPUT_METHOD_SERVICE
-        ) as InputMethodManager
-
-        imm.hideSoftInputFromWindow(input.windowToken, 0)
+        hideKeyboard()
 
         val normalized = text.lowercase(Locale("ar", "EG"))
 
@@ -1050,9 +1054,17 @@ class MainActivity : Activity() {
         if (chatScreenOpen) {
             stopSingleListening()
             tts?.stop()
+            hideKeyboard()
             showHome()
         } else {
-            super.onBackPressed()
+            AlertDialog.Builder(this)
+                .setTitle("الخروج من مساعد الذئب")
+                .setMessage("هل تريد الخروج من التطبيق؟")
+                .setNegativeButton("إلغاء", null)
+                .setPositiveButton("خروج") { _, _ ->
+                    finish()
+                }
+                .show()
         }
     }
 
