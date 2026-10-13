@@ -3,34 +3,50 @@ package com.wolfassistant
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.os.Bundle
+import android.content.res.ColorStateList
 import android.graphics.Color
-import android.view.Gravity
-import android.view.View
-import android.view.ViewGroup
-import android.view.inputmethod.InputMethodManager
-import android.content.Context
+import android.graphics.drawable.GradientDrawable
+import android.os.Build
+import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
-import android.widget.*
-import android.app.AlertDialog
+import android.view.Gravity
+import android.view.View
+import android.view.ViewGroup
+import android.view.WindowInsets
+import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
+import android.widget.Button
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 class MainActivity : Activity() {
 
     private val bg = Color.rgb(15, 20, 32)
     private val panel = Color.rgb(27, 35, 51)
-    private val accent = Color.rgb(70, 150, 255)
+    private val accent = Color.rgb(55, 130, 235)
+    private val border = Color.rgb(90, 120, 160)
 
     private lateinit var messages: LinearLayout
     private lateinit var input: EditText
     private lateinit var scroll: ScrollView
     private lateinit var status: TextView
     private lateinit var continuousButton: Button
+    private lateinit var readButton: Button
+
+    private val messageTexts = ArrayList<String>()
+    private val messageOwners = ArrayList<Boolean>()
 
     private var recognizer: SpeechRecognizer? = null
     private var tts: TextToSpeech? = null
@@ -40,8 +56,25 @@ class MainActivity : Activity() {
     private var pendingAction = ""
     private var lastAssistantReply = ""
 
+    private fun dp(value: Int): Int =
+        (value * resources.displayMetrics.density).toInt()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        window.statusBarColor = bg
+        window.navigationBarColor = bg
+        window.setSoftInputMode(
+            WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+        )
+
+        readReplies = savedInstanceState?.getBoolean(
+            "read_replies", false
+        ) ?: false
+
+        lastAssistantReply = savedInstanceState?.getString(
+            "last_reply", ""
+        ) ?: ""
 
         tts = TextToSpeech(this) { result ->
             if (result == TextToSpeech.SUCCESS) {
@@ -52,15 +85,43 @@ class MainActivity : Activity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(bg)
-            setPadding(16, 10, 16, 10)
+            setPadding(dp(16), dp(8), dp(16), dp(8))
+        }
+
+        // مراعاة شريطي الحالة والتنقل في الهاتف
+        root.setOnApplyWindowInsetsListener { view, insets ->
+            val top: Int
+            val bottom: Int
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val bars = insets.getInsets(
+                    WindowInsets.Type.systemBars()
+                )
+                top = bars.top
+                bottom = bars.bottom
+            } else {
+                @Suppress("DEPRECATION")
+                run {
+                    top = insets.systemWindowInsetTop
+                    bottom = insets.systemWindowInsetBottom
+                }
+            }
+
+            view.setPadding(
+                dp(16),
+                top + dp(8),
+                dp(16),
+                bottom + dp(8)
+            )
+            insets
         }
 
         val header = TextView(this).apply {
             text = "🐺 مساعد الذئب"
-            textSize = 27f
+            textSize = 26f
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
-            setPadding(8, 12, 8, 6)
+            setPadding(dp(8), dp(8), dp(8), dp(4))
         }
         root.addView(header)
 
@@ -69,7 +130,7 @@ class MainActivity : Activity() {
             textSize = 14f
             gravity = Gravity.CENTER
             setTextColor(Color.rgb(100, 220, 160))
-            setPadding(8, 0, 8, 12)
+            setPadding(dp(8), dp(2), dp(8), dp(10))
         }
         root.addView(status)
 
@@ -79,16 +140,28 @@ class MainActivity : Activity() {
         root.addView(
             divider,
             LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 1
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(1)
             )
         )
 
-        scroll = ScrollView(this)
+        scroll = ScrollView(this).apply {
+            isFillViewport = true
+            clipToPadding = false
+        }
+
         messages = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, 10, 0, 10)
+            setPadding(0, dp(10), 0, dp(10))
         }
-        scroll.addView(messages)
+
+        scroll.addView(
+            messages,
+            ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        )
+
         root.addView(
             scroll,
             LinearLayout.LayoutParams(
@@ -96,40 +169,48 @@ class MainActivity : Activity() {
             )
         )
 
-        addMessage(
-            "أهلًا بك! أنا مساعد الذئب 🐺\n\n" +
-                "يمكنك الكتابة أو استخدام الميكروفون للتحدث معي.",
-            false
-        )
-
+        // حقل كتابة واضح بحدود وخلفية مميزة
         input = EditText(this).apply {
             hint = "اكتب رسالتك هنا..."
             textSize = 16f
             setTextColor(Color.WHITE)
-            setHintTextColor(Color.LTGRAY)
-            setPadding(14, 8, 14, 8)
+            setHintTextColor(Color.rgb(190, 200, 215))
+            setPadding(dp(14), dp(8), dp(14), dp(8))
             setSingleLine(true)
-            setBackgroundColor(panel)
+            minHeight = dp(52)
+            background = GradientDrawable().apply {
+                setColor(panel)
+                cornerRadius = dp(12).toFloat()
+                setStroke(dp(1), border)
+            }
+            imeOptions =
+                android.view.inputmethod.EditorInfo.IME_ACTION_SEND
         }
 
         val sendRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(8), 0, 0)
         }
 
         sendRow.addView(
             input,
-            LinearLayout.LayoutParams(0, 52, 1f)
+            LinearLayout.LayoutParams(0, dp(54), 1f).apply {
+                marginEnd = dp(8)
+            }
         )
 
         val sendButton = makeButton("إرسال")
-        sendRow.addView(sendButton)
+        sendRow.addView(
+            sendButton,
+            LinearLayout.LayoutParams(dp(82), dp(54))
+        )
         root.addView(sendRow)
 
         val voiceRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            setPadding(0, 8, 0, 0)
+            setPadding(0, dp(6), 0, 0)
         }
 
         val micButton = makeButton("🎙️ تحدث")
@@ -138,39 +219,74 @@ class MainActivity : Activity() {
 
         voiceRow.addView(
             micButton,
-            LinearLayout.LayoutParams(0, 48, 1f)
+            LinearLayout.LayoutParams(0, dp(46), 1f).apply {
+                marginEnd = dp(4)
+            }
         )
         voiceRow.addView(
             continuousButton,
-            LinearLayout.LayoutParams(0, 48, 1.4f)
+            LinearLayout.LayoutParams(0, dp(46), 1.45f).apply {
+                marginEnd = dp(4)
+            }
         )
         voiceRow.addView(
             stopButton,
-            LinearLayout.LayoutParams(0, 48, 0.8f)
+            LinearLayout.LayoutParams(0, dp(46), 0.8f)
         )
         root.addView(voiceRow)
 
-        val speechRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-        }
-
-        val readButton = makeButton("🔊 قراءة الردود: متوقفة")
-        speechRow.addView(
+        readButton = makeButton(
+            if (readReplies) "🔊 قراءة الردود: مفعّلة"
+            else "🔊 قراءة الردود: متوقفة"
+        )
+        root.addView(
             readButton,
             LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 46
-            )
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(44)
+            ).apply {
+                topMargin = dp(4)
+            }
         )
-        root.addView(speechRow)
 
         setContentView(root)
+        root.requestApplyInsets()
 
-        sendButton.setOnClickListener { sendMessage() }
+        // استعادة الرسائل بعد تدوير الشاشة
+        val oldTexts =
+            savedInstanceState?.getStringArrayList("chat_texts")
+        val oldOwners =
+            savedInstanceState?.getBooleanArray("chat_owners")
 
-        input.setOnEditorActionListener { _, _, _ ->
+        if (oldTexts != null && oldOwners != null &&
+            oldTexts.isNotEmpty()
+        ) {
+            val count = minOf(oldTexts.size, oldOwners.size)
+            for (i in 0 until count) {
+                addMessage(oldTexts[i], oldOwners[i])
+            }
+        } else {
+            addMessage(
+                "أهلًا بك! أنا مساعد الذئب 🐺\n\n" +
+                    "يمكنك الكتابة أو استخدام الميكروفون للتحدث معي.",
+                false
+            )
+        }
+
+        sendButton.setOnClickListener {
             sendMessage()
-            true
+        }
+
+        input.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId ==
+                android.view.inputmethod.EditorInfo.IME_ACTION_SEND ||
+                actionId ==
+                android.view.inputmethod.EditorInfo.IME_ACTION_DONE
+            ) {
+                sendMessage()
+                true
+            } else {
+                false
+            }
         }
 
         micButton.setOnClickListener {
@@ -191,8 +307,8 @@ class MainActivity : Activity() {
                     .setNegativeButton("إلغاء", null)
                     .setPositiveButton("أوافق") { _, _ ->
                         continuousListening = true
-                        updateContinuousButton()
                         pendingAction = "continuous"
+                        updateContinuousButton()
                         startVoiceWithPermission()
                     }
                     .show()
@@ -220,14 +336,30 @@ class MainActivity : Activity() {
         }
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putStringArrayList(
+            "chat_texts", ArrayList(messageTexts)
+        )
+        outState.putBooleanArray(
+            "chat_owners",
+            BooleanArray(messageOwners.size) { messageOwners[it] }
+        )
+        outState.putBoolean("read_replies", readReplies)
+        outState.putString("last_reply", lastAssistantReply)
+    }
+
     private fun makeButton(label: String): Button {
         return Button(this).apply {
             text = label
             textSize = 12f
             isAllCaps = false
             setTextColor(Color.WHITE)
+            minWidth = 0
+            minimumWidth = 0
+            setPadding(dp(4), 0, dp(4), 0)
             setBackgroundTintList(
-                android.content.res.ColorStateList.valueOf(accent)
+                ColorStateList.valueOf(accent)
             )
         }
     }
@@ -242,8 +374,7 @@ class MainActivity : Activity() {
             != PackageManager.PERMISSION_GRANTED
         ) {
             requestPermissions(
-                arrayOf(Manifest.permission.RECORD_AUDIO),
-                101
+                arrayOf(Manifest.permission.RECORD_AUDIO), 101
             )
             return
         }
@@ -276,9 +407,7 @@ class MainActivity : Activity() {
     private fun startListening() {
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED
-        ) {
-            return
-        }
+        ) return
 
         try {
             recognizer?.destroy()
@@ -286,7 +415,6 @@ class MainActivity : Activity() {
 
             recognizer?.setRecognitionListener(
                 object : RecognitionListener {
-
                     override fun onReadyForSpeech(params: Bundle?) {
                         listening = true
                         setStatus("🎙️ أستمع إليك الآن...")
@@ -303,11 +431,9 @@ class MainActivity : Activity() {
 
                     override fun onResults(results: Bundle?) {
                         listening = false
-                        val spoken = results
-                            ?.getStringArrayList(
-                                SpeechRecognizer.RESULTS_RECOGNITION
-                            )
-                            ?.firstOrNull()
+                        val spoken = results?.getStringArrayList(
+                            SpeechRecognizer.RESULTS_RECOGNITION
+                        )?.firstOrNull()
 
                         if (!spoken.isNullOrBlank()) {
                             input.setText(spoken)
@@ -319,12 +445,13 @@ class MainActivity : Activity() {
 
                     override fun onError(error: Int) {
                         listening = false
-
                         if (continuousListening) {
                             setStatus("الاستماع مستمر...")
                             restartContinuousIfNeeded()
                         } else {
-                            setStatus("لم أتعرف على الكلام، حاول مرة أخرى")
+                            setStatus(
+                                "لم أتعرف على الكلام، حاول مرة أخرى"
+                            )
                         }
                     }
 
@@ -342,22 +469,13 @@ class MainActivity : Activity() {
                     RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                     RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
                 )
-                putExtra(
-                    RecognizerIntent.EXTRA_LANGUAGE,
-                    "ar-EG"
-                )
-                putExtra(
-                    RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE,
-                    "ar-EG"
-                )
-                putExtra(
-                    RecognizerIntent.EXTRA_PARTIAL_RESULTS,
-                    true
-                )
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ar-EG")
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "ar-EG")
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             }
 
             recognizer?.startListening(intent)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             setStatus("تعذر تشغيل الميكروفون")
         }
     }
@@ -377,10 +495,12 @@ class MainActivity : Activity() {
     private fun stopListening() {
         continuousListening = false
         listening = false
+
         try {
             recognizer?.cancel()
         } catch (_: Exception) {
         }
+
         updateContinuousButton()
         setStatus("● جاهز للمساعدة")
     }
@@ -418,10 +538,9 @@ class MainActivity : Activity() {
 
             normalized.contains("الوقت") ->
                 "الوقت الحالي على جهازك: " +
-                    java.text.SimpleDateFormat(
-                        "hh:mm a",
-                        Locale.getDefault()
-                    ).format(java.util.Date())
+                    SimpleDateFormat(
+                        "hh:mm a", Locale.getDefault()
+                    ).format(Date())
 
             else ->
                 "وصلتني رسالتك. الواجهة تعمل بنجاح، " +
@@ -453,27 +572,46 @@ class MainActivity : Activity() {
     }
 
     private fun addMessage(text: String, isUser: Boolean) {
+        messageTexts.add(text)
+        messageOwners.add(isUser)
+
         val bubble = TextView(this).apply {
             this.text = text
             textSize = 16f
             setTextColor(Color.WHITE)
-            setPadding(16, 14, 16, 14)
-            setBackgroundColor(
-                if (isUser) Color.rgb(35, 75, 125) else panel
-            )
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+            background = GradientDrawable().apply {
+                setColor(
+                    if (isUser) Color.rgb(35, 75, 125) else panel
+                )
+                cornerRadius = dp(14).toFloat()
+                setStroke(
+                    dp(1),
+                    if (isUser) Color.rgb(65, 115, 175) else border
+                )
+            }
         }
 
         val params = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT
-        )
-        params.setMargins(0, 6, 0, 6)
+        ).apply {
+            setMargins(0, dp(5), 0, dp(5))
+        }
+
         messages.addView(bubble, params)
-        scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
+        scroll.post {
+            scroll.fullScroll(View.FOCUS_DOWN)
+        }
     }
 
     override fun onDestroy() {
-        recognizer?.destroy()
+        try {
+            recognizer?.cancel()
+            recognizer?.destroy()
+        } catch (_: Exception) {
+        }
+
         tts?.stop()
         tts?.shutdown()
         super.onDestroy()
