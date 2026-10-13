@@ -21,6 +21,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
 import android.view.WindowManager
+import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.EditText
@@ -53,7 +54,6 @@ class MainActivity : Activity() {
     private var continuousListening = false
     private var listening = false
     private var readReplies = false
-    private var pendingAction = ""
     private var lastAssistantReply = ""
 
     private fun dp(value: Int): Int =
@@ -88,7 +88,6 @@ class MainActivity : Activity() {
             setPadding(dp(16), dp(8), dp(16), dp(8))
         }
 
-        // مراعاة شريطي الحالة والتنقل في الهاتف
         root.setOnApplyWindowInsetsListener { view, insets ->
             val top: Int
             val bottom: Int
@@ -154,13 +153,8 @@ class MainActivity : Activity() {
             setPadding(0, dp(10), 0, dp(10))
         }
 
-        scroll.addView(
-            messages,
-            ScrollView.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-        )
+        // إصلاح خطأ البناء: نضيف حاوية الرسائل مباشرة إلى ScrollView
+        scroll.addView(messages)
 
         root.addView(
             scroll,
@@ -169,7 +163,6 @@ class MainActivity : Activity() {
             )
         )
 
-        // حقل كتابة واضح بحدود وخلفية مميزة
         input = EditText(this).apply {
             hint = "اكتب رسالتك هنا..."
             textSize = 16f
@@ -178,13 +171,12 @@ class MainActivity : Activity() {
             setPadding(dp(14), dp(8), dp(14), dp(8))
             setSingleLine(true)
             minHeight = dp(52)
+            imeOptions = EditorInfo.IME_ACTION_SEND
             background = GradientDrawable().apply {
                 setColor(panel)
                 cornerRadius = dp(12).toFloat()
                 setStroke(dp(1), border)
             }
-            imeOptions =
-                android.view.inputmethod.EditorInfo.IME_ACTION_SEND
         }
 
         val sendRow = LinearLayout(this).apply {
@@ -251,7 +243,6 @@ class MainActivity : Activity() {
         setContentView(root)
         root.requestApplyInsets()
 
-        // استعادة الرسائل بعد تدوير الشاشة
         val oldTexts =
             savedInstanceState?.getStringArrayList("chat_texts")
         val oldOwners =
@@ -277,10 +268,8 @@ class MainActivity : Activity() {
         }
 
         input.setOnEditorActionListener { _, actionId, _ ->
-            if (actionId ==
-                android.view.inputmethod.EditorInfo.IME_ACTION_SEND ||
-                actionId ==
-                android.view.inputmethod.EditorInfo.IME_ACTION_DONE
+            if (actionId == EditorInfo.IME_ACTION_SEND ||
+                actionId == EditorInfo.IME_ACTION_DONE
             ) {
                 sendMessage()
                 true
@@ -290,7 +279,6 @@ class MainActivity : Activity() {
         }
 
         micButton.setOnClickListener {
-            pendingAction = "push"
             startVoiceWithPermission()
         }
 
@@ -307,7 +295,6 @@ class MainActivity : Activity() {
                     .setNegativeButton("إلغاء", null)
                     .setPositiveButton("أوافق") { _, _ ->
                         continuousListening = true
-                        pendingAction = "continuous"
                         updateContinuousButton()
                         startVoiceWithPermission()
                     }
@@ -431,6 +418,7 @@ class MainActivity : Activity() {
 
                     override fun onResults(results: Bundle?) {
                         listening = false
+
                         val spoken = results?.getStringArrayList(
                             SpeechRecognizer.RESULTS_RECOGNITION
                         )?.firstOrNull()
@@ -470,7 +458,9 @@ class MainActivity : Activity() {
                     RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
                 )
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ar-EG")
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "ar-EG")
+                putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "ar-EG"
+                )
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             }
 
@@ -600,6 +590,7 @@ class MainActivity : Activity() {
         }
 
         messages.addView(bubble, params)
+
         scroll.post {
             scroll.fullScroll(View.FOCUS_DOWN)
         }
