@@ -6,7 +6,7 @@
 
     <application
         android:allowBackup="true"
-        android:label="مساعد الذئب"
+        android:label="Wolf Assistant"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
 
