@@ -3,6 +3,8 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
     <application
         android:allowBackup="true"
@@ -28,6 +30,11 @@
             </intent-filter>
 
         </activity>
+
+        <service
+            android:name=".VoiceAssistantService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
     </application>
 
