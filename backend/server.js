@@ -1,4 +1,3 @@
-
 'use strict';
 
 const express = require('express');
@@ -57,19 +56,25 @@ function createApp({ env = process.env, fetchImpl = global.fetch } = {}) {
     }
 
     const apiKey = env.WOLF_AI_API_KEY;
+
     const baseUrl = (
       env.WOLF_AI_BASE_URL ||
       'https://api.openai.com/v1'
     ).replace(/\/+$/, '');
+
     const model = env.WOLF_AI_MODEL || 'gpt-4o-mini';
 
     if (!apiKey) {
       console.error('[chat] AI API key is not configured');
-      return res.status(503).json({ error: 'AI provider is not configured' });
+      return res.status(503).json({
+        error: 'AI provider is not configured'
+      });
     }
 
     if (!baseUrl.startsWith('https://')) {
-      return res.status(500).json({ error: 'AI provider URL must use HTTPS' });
+      return res.status(500).json({
+        error: 'AI provider URL must use HTTPS'
+      });
     }
 
     const history = Array.isArray(req.body?.history)
@@ -108,6 +113,7 @@ function createApp({ env = process.env, fetchImpl = global.fetch } = {}) {
     }
 
     const controller = new AbortController();
+
     const timeout = setTimeout(() => {
       console.warn('[chat] Provider request timed out');
       controller.abort();
@@ -115,23 +121,73 @@ function createApp({ env = process.env, fetchImpl = global.fetch } = {}) {
 
     try {
       console.log('[chat] Sending request to AI provider');
+      console.log(`[chat] Provider base URL: ${baseUrl}`);
+      console.log(`[chat] Requested model: ${model}`);
 
-      const upstream = await fetchImpl(`${baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ model, messages, temperature: 0.7 }),
-        signal: controller.signal
-      });
+      const upstream = await fetchImpl(
+        `${baseUrl}/chat/completions`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            temperature: 0.7
+          }),
+          signal: controller.signal
+        }
+      );
 
-      console.log(`[chat] AI provider HTTP status: ${upstream.status}`);
+      console.log(
+        `[chat] AI provider HTTP status: ${upstream.status}`
+      );
 
       if (!upstream.ok) {
+        let providerMessage = '';
+
+        try {
+          const errorData = await upstream.json();
+
+          const rawMessage =
+            errorData?.error?.message ||
+            errorData?.message ||
+            '';
+
+          if (typeof rawMessage === 'string') {
+            providerMessage = rawMessage
+              .replace(/https?:\/\/[^\s"'<>]+/gi, '[URL]')
+              .replace(
+                /\bAIza[0-9A-Za-z_-]{20,}\b/g,
+                '[REDACTED_KEY]'
+              )
+              .replace(
+                /Bearer\s+\S+/gi,
+                'Bearer [REDACTED]'
+              )
+              .replace(
+                /key\s*[=:]\s*\S+/gi,
+                'key=[REDACTED]'
+              )
+              .slice(0, 500);
+          }
+        } catch {
+          providerMessage = 'Could not parse provider error response';
+        }
+
+        console.error(
+          '[chat] Provider error details:',
+          providerMessage || 'No error message returned'
+        );
+
         const status = upstream.status === 429 ? 429 : 502;
+
         return res.status(status).json({
-          error: 'AI provider request failed'
+          error: 'AI provider request failed',
+          providerStatus: upstream.status,
+          providerMessage: providerMessage || 'No details available'
         });
       }
 
@@ -140,17 +196,24 @@ function createApp({ env = process.env, fetchImpl = global.fetch } = {}) {
 
       if (typeof reply !== 'string' || !reply.trim()) {
         console.error('[chat] Provider returned an empty reply');
+
         return res.status(502).json({
           error: 'AI provider returned an empty response'
         });
       }
 
       console.log('[chat] Reply generated successfully');
-      return res.json({ reply: reply.trim(), model });
+
+      return res.json({
+        reply: reply.trim(),
+        model
+      });
     } catch (err) {
       console.error(
         '[chat] Provider request failed:',
-        controller.signal.aborted ? 'TimeoutOrAbort' : (err?.name || 'UnknownError')
+        controller.signal.aborted
+          ? 'TimeoutOrAbort'
+          : (err?.name || 'UnknownError')
       );
 
       return res.status(502).json({
@@ -163,15 +226,25 @@ function createApp({ env = process.env, fetchImpl = global.fetch } = {}) {
 
   app.use((err, _req, res, _next) => {
     if (err?.type === 'entity.too.large') {
-      return res.status(413).json({ error: 'request too large' });
+      return res.status(413).json({
+        error: 'request too large'
+      });
     }
 
     if (err instanceof SyntaxError) {
-      return res.status(400).json({ error: 'invalid JSON' });
+      return res.status(400).json({
+        error: 'invalid JSON'
+      });
     }
 
-    console.error('[server] Request processing failed:', err?.name || 'UnknownError');
-    return res.status(500).json({ error: 'internal server error' });
+    console.error(
+      '[server] Request processing failed:',
+      err?.name || 'UnknownError'
+    );
+
+    return res.status(500).json({
+      error: 'internal server error'
+    });
   });
 
   return app;
