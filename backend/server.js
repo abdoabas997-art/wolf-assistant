@@ -1,3 +1,4 @@
+
 'use strict';
 
 const express = require('express');
@@ -135,7 +136,8 @@ function createApp({ env = process.env, fetchImpl = global.fetch } = {}) {
           body: JSON.stringify({
             model,
             messages,
-            temperature: 0.7
+            temperature: 0.7,
+            reasoning_effort: 'low'
           }),
           signal: controller.signal
         }
