@@ -31,7 +31,13 @@ import android.widget.TextView
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-
+import android.os.Handler
+import android.os.Looper
+import org.json.JSONArray
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.concurrent.Executors
 class MainActivity : Activity() {
 
     private val bg = Color.rgb(15, 20, 32)
@@ -58,8 +64,13 @@ class MainActivity : Activity() {
     private var lastAssistantReply = ""
     private var chatScreenOpen = false
     private var receiverRegistered = false
+private val networkExecutor = Executors.newSingleThreadExecutor()
+private val mainHandler = Handler(Looper.getMainLooper())
 
+private val backendUrl =
+    "https://wolf-assistant-d6dur.faable.link/chat"
     // معالجة زر الرجوع في إصدارات أندرويد الحديثة.
+  private var requestInProgress = false
     private var platformBackCallback:
         android.window.OnBackInvokedCallback? = null
 
@@ -922,52 +933,143 @@ class MainActivity : Activity() {
     }
 
     private fun sendMessage() {
-        val text = input.text.toString().trim()
-        if (text.isEmpty()) return
+    val text = input.text.toString().trim()
+    if (text.isEmpty()) return
+if (requestInProgress) {
+    setStatus("انتظر حتى يصل الرد السابق...")
+    return
+}
 
-        addMessage("أنت:\n$text", true)
-        input.setText("")
-        hideKeyboard()
+requestInProgress = true
+    addMessage("أنت:\n$text", true)
 
-        val normalized = text.lowercase(Locale("ar", "EG"))
+    input.setText("")
+    hideKeyboard()
 
-        val reply = when {
-            normalized.contains("اسمك") ->
-                "أنا مساعد الذئب 🐺، مساعدك الذكي."
+    setStatus("🐺 جارٍ إرسال رسالتك إلى مساعد الذئب...")
 
-            normalized.contains("مرحبا") ||
-                normalized.contains("أهلا") ||
-                normalized.contains("اهلا") ||
-                normalized.contains("السلام") ->
-                "أهلًا بك! كيف أقدر أساعدك؟"
+    // تجهيز آخر 12 رسالة سابقة لإرسال سياق المحادثة.
+    val history = JSONArray()
+    val endIndex = messageTexts.size - 1
+    val startIndex = maxOf(0, endIndex - 12)
 
-            normalized.contains("الوقت") ||
-                normalized.contains("الساعة") ->
-                "الوقت الحالي على جهازك: " +
-                    SimpleDateFormat(
-                        "hh:mm a",
-                        Locale.getDefault()
-                    ).format(Date())
+    for (i in startIndex until endIndex) {
+        val original = messageTexts[i]
 
-            normalized.contains("حالة الاستماع") ->
-                if (continuousListening) {
-                    "الاستماع المستمر قيد التشغيل."
-                } else {
-                    "الاستماع المستمر متوقف."
+        val content = when {
+            original.startsWith("أنت:\n") ->
+                original.removePrefix("أنت:\n")
+
+            original.startsWith("🐺 مساعد الذئب:\n") ->
+                original.removePrefix("🐺 مساعد الذئب:\n")
+
+            else -> original
+        }
+
+        val item = JSONObject()
+        item.put(
+            "role",
+            if (messageOwners.getOrElse(i) { false }) {
+                "user"
+            } else {
+                "assistant"
+            }
+        )
+        item.put("content", content)
+
+        history.put(item)
+    }
+
+    networkExecutor.execute {
+        var reply: String
+
+        try {
+            val payload = JSONObject().apply {
+                put("message", text)
+                put("history", history)
+            }
+
+            val connection =
+                URL(backendUrl).openConnection() as HttpURLConnection
+
+            try {
+                connection.requestMethod = "POST"
+                connection.connectTimeout = 15000
+                connection.readTimeout = 45000
+                connection.doOutput = true
+
+                connection.setRequestProperty(
+                    "Content-Type",
+                    "application/json; charset=utf-8"
+                )
+
+                connection.setRequestProperty(
+                    "Accept",
+                    "application/json"
+                )
+
+                connection.outputStream.use { output ->
+                    output.write(
+                        payload.toString().toByteArray(Charsets.UTF_8)
+                    )
                 }
 
-            else ->
-                "وصلتني رسالتك. الردود الذكية الكاملة " +
-                    "والذاكرة المتقدمة ما زالت ضمن مراحل التطوير."
+                val responseCode = connection.responseCode
+
+                val responseStream =
+                    if (responseCode in 200..299) {
+                        connection.inputStream
+                    } else {
+                        connection.errorStream
+                    }
+
+                val responseText = responseStream
+                    ?.bufferedReader()
+                    ?.use { it.readText() }
+                    ?: ""
+
+                if (responseCode !in 200..299) {
+                    throw Exception("Server error")
+                }
+
+                val response = JSONObject(responseText)
+
+                reply = response.optString("reply", "").trim()
+
+                if (reply.isEmpty()) {
+                    throw Exception("Empty response")
+                }
+
+            } finally {
+                connection.disconnect()
+            }
+
+        } catch (_: Exception) {
+            reply =
+                "تعذر الاتصال بخادم الذكاء الاصطناعي حاليًا. " +
+                "تأكد من اتصال الإنترنت وحالة الخادم، ثم حاول مرة أخرى."
         }
 
-        lastAssistantReply = reply
-        addMessage("🐺 مساعد الذئب:\n$reply", false)
+        mainHandler.post {
+    requestInProgress = false
 
-        if (readReplies) {
-            speak(reply)
+    if (isFinishing || isDestroyed) return@post
+
+            lastAssistantReply = reply
+
+            addMessage(
+                "🐺 مساعد الذئب:\n$reply",
+                false
+            )
+
+            setStatus("● جاهز للمساعدة")
+
+            if (readReplies) {
+                speak(reply)
+            }
         }
     }
+}
 
     private fun speak(text: String) {
         tts?.speak(
@@ -1107,7 +1209,7 @@ class MainActivity : Activity() {
 
             receiverRegistered = false
         }
-
+networkExecutor.shutdownNow()
         super.onDestroy()
     }
 }
