@@ -1,7 +1,19 @@
-
 'use strict';
 
 const express = require('express');
+
+function sanitizeProviderMessage(value) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  return value
+    .replace(/https?:\/\/[^\s"'<>]+/gi, '[URL]')
+    .replace(/\bAIza[0-9A-Za-z_-]{20,}\b/g, '[REDACTED_KEY]')
+    .replace(/Bearer\s+\S+/gi, 'Bearer [REDACTED]')
+    .replace(/key\s*[=:]\s*\S+/gi, 'key=[REDACTED]')
+    .slice(0, 500);
+}
 
 function createApp({ env = process.env, fetchImpl = global.fetch } = {}) {
   const app = express();
@@ -148,40 +160,48 @@ function createApp({ env = process.env, fetchImpl = global.fetch } = {}) {
       );
 
       if (!upstream.ok) {
-        let providerMessage = '';
+        const contentType =
+          upstream.headers?.get?.('content-type') || 'unknown';
+
+        console.log(
+          `[chat] Provider error content type: ${contentType}`
+        );
+
+        let responseBody = '';
 
         try {
-          const errorData = await upstream.json();
-
-          const rawMessage =
-            errorData?.error?.message ||
-            errorData?.message ||
-            '';
-
-          if (typeof rawMessage === 'string') {
-            providerMessage = rawMessage
-              .replace(/https?:\/\/[^\s"'<>]+/gi, '[URL]')
-              .replace(
-                /\bAIza[0-9A-Za-z_-]{20,}\b/g,
-                '[REDACTED_KEY]'
-              )
-              .replace(
-                /Bearer\s+\S+/gi,
-                'Bearer [REDACTED]'
-              )
-              .replace(
-                /key\s*[=:]\s*\S+/gi,
-                'key=[REDACTED]'
-              )
-              .slice(0, 500);
-          }
+          responseBody = await upstream.text();
         } catch {
-          providerMessage = 'Could not parse provider error response';
+          responseBody = '';
         }
+
+        let providerMessage = '';
+
+        if (responseBody) {
+          try {
+            const errorData = JSON.parse(responseBody);
+
+            const rawMessage =
+              errorData?.error?.message ||
+              errorData?.message ||
+              errorData?.error ||
+              '';
+
+            providerMessage =
+              typeof rawMessage === 'string'
+                ? rawMessage
+                : JSON.stringify(rawMessage);
+          } catch {
+            providerMessage = responseBody;
+          }
+        }
+
+        providerMessage =
+          sanitizeProviderMessage(providerMessage);
 
         console.error(
           '[chat] Provider error details:',
-          providerMessage || 'No error message returned'
+          providerMessage || 'Empty provider error response'
         );
 
         const status = upstream.status === 429 ? 429 : 502;
@@ -189,7 +209,8 @@ function createApp({ env = process.env, fetchImpl = global.fetch } = {}) {
         return res.status(status).json({
           error: 'AI provider request failed',
           providerStatus: upstream.status,
-          providerMessage: providerMessage || 'No details available'
+          providerMessage:
+            providerMessage || 'No details available'
         });
       }
 
