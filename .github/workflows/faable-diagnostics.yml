@@ -1,0 +1,51 @@
+
+name: Faable Diagnostics
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  inspect-faable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Check out linked repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Faable CLI
+        run: npm install --global @faable/faable@latest
+
+      - name: Read Faable deployment status and logs
+        shell: bash
+        run: |
+          set +e
+
+          run_report() {
+            title="$1"
+            shift
+            echo "## $title" >> "$GITHUB_STEP_SUMMARY"
+            echo '~~~text' >> "$GITHUB_STEP_SUMMARY"
+            "$@" > /tmp/faable-report.txt 2>&1
+            result=$?
+            cat /tmp/faable-report.txt
+            cat /tmp/faable-report.txt >> "$GITHUB_STEP_SUMMARY"
+            if [ "$result" -ne 0 ]; then
+              echo "Command exit code: $result" >> "$GITHUB_STEP_SUMMARY"
+            fi
+            echo '~~~' >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          run_report "App status" faable deploy status --json
+          run_report "Recent deployments" faable deploy deployments --json
+          run_report "Runtime logs" faable deploy logs --json
+          run_report "Latest build logs" faable deploy logs --build --json
