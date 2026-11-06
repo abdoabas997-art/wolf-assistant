@@ -985,9 +985,12 @@ private fun handleLocalVoiceCommand(spokenText: String): Boolean {
     }
 
     stopSingleListening()
-                     }
 }
-                        }
+
+override fun onError(error: Int) {
+    setStatus("لم أتعرف على الكلام، حاول مرة أخرى")
+    stopSingleListening()
+}
 
                     override fun onError(error: Int) {
                         setStatus("لم أتعرف على الكلام، حاول مرة أخرى")
