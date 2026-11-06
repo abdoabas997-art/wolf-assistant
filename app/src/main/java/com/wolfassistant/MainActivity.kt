@@ -992,11 +992,6 @@ override fun onError(error: Int) {
     stopSingleListening()
 }
 
-                    override fun onError(error: Int) {
-                        setStatus("لم أتعرف على الكلام، حاول مرة أخرى")
-                        stopSingleListening()
-                    }
-
                     override fun onRmsChanged(rmsdB: Float) {}
                     override fun onBufferReceived(buffer: ByteArray?) {}
                     override fun onPartialResults(partialResults: Bundle?) {}
