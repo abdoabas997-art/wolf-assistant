@@ -80,10 +80,15 @@ private val backendUrl =
 
             val spoken = intent.getStringExtra("spoken_text")
             if (!spoken.isNullOrBlank() && chatScreenOpen) {
-                input.setText(spoken)
-                input.setSelection(input.text.length)
-                sendMessage()
-            }
+    if (handleLocalVoiceCommand(spoken)) {
+        return
+    }
+
+    input.setText(spoken)
+    input.setSelection(input.text.length)
+    sendMessage()
+}
+    
         }
     }
 
