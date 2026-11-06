@@ -162,6 +162,106 @@ private val backendUrl =
         receiverRegistered = true
     }
 
+private fun sendWolfAccessibilityCommand(action: String) {
+    val intent = Intent(action).setPackage(packageName)
+    sendBroadcast(intent)
+}
+
+private fun parseGridNumber(value: String): Int? {
+    val numbers = mapOf(
+        "واحد" to 1, "الأول" to 1, "الاول" to 1, "الأولى" to 1,
+        "اثنين" to 2, "اتنين" to 2, "الثاني" to 2, "الثانى" to 2,
+        "ثلاثة" to 3, "تلاتة" to 3, "الثالث" to 3, "الثالثة" to 3,
+        "أربعة" to 4, "اربعة" to 4, "أربعه" to 4, "الرابع" to 4,
+        "خمسة" to 5, "خمسه" to 5, "الخامس" to 5
+    )
+
+    return value.toIntOrNull() ?: numbers[value]
+}
+
+private fun handleLocalVoiceCommand(spokenText: String): Boolean {
+    val text = spokenText
+        .trim()
+        .lowercase(Locale("ar", "EG"))
+        .replace('٠', '0')
+        .replace('١', '1')
+        .replace('٢', '2')
+        .replace('٣', '3')
+        .replace('٤', '4')
+        .replace('٥', '5')
+        .replace('٦', '6')
+        .replace('٧', '7')
+        .replace('٨', '8')
+        .replace('٩', '9')
+
+    when {
+        text.contains("أظهر الشبكة") ||
+        text.contains("اظهر الشبكة") ||
+        text.contains("اعرض الشبكة") ||
+        text.contains("افتح الشبكة") -> {
+            sendWolfAccessibilityCommand(
+                WolfAccessibilityService.ACTION_SHOW_GRID
+            )
+            addMessage("🐺 تم إرسال أمر إظهار شبكة الشاشة.", false)
+            return true
+        }
+
+        text.contains("أخف الشبكة") ||
+        text.contains("اخف الشبكة") ||
+        text.contains("إخفاء الشبكة") ||
+        text.contains("اخفاء الشبكة") -> {
+            sendWolfAccessibilityCommand(
+                WolfAccessibilityService.ACTION_HIDE_GRID
+            )
+            addMessage("🐺 تم إرسال أمر إخفاء الشبكة.", false)
+            return true
+        }
+
+        text.contains("التقط صورة للشاشة") ||
+        text.contains("صور الشاشة") ||
+        text.contains("التقط صورة الشاشة") -> {
+            sendWolfAccessibilityCommand(
+                WolfAccessibilityService.ACTION_CAPTURE
+            )
+            addMessage("🐺 تم إرسال أمر التقاط صورة الشاشة.", false)
+            return true
+        }
+    }
+
+    val rowMatch = Regex(
+        "(?:الصف|صف)\\s*(\\d+|واحد|اثنين|اتنين|ثلاثة|تلاتة|أربعة|اربعة|خمسة|الأول|الاول|الثاني|الثانى|الثالث|الرابع|الخامس)"
+    ).find(text)
+
+    val columnMatch = Regex(
+        "(?:العمود|عمود)\\s*(\\d+|واحد|اثنين|اتنين|ثلاثة|تلاتة|أربعة|اربعة|خمسة|الأول|الاول|الثاني|الثانى|الثالث|الرابع|الخامس)"
+    ).find(text)
+
+    if (rowMatch != null && columnMatch != null) {
+        val row = parseGridNumber(rowMatch.groupValues[1])
+        val column = parseGridNumber(columnMatch.groupValues[1])
+
+        if (row != null && column != null &&
+            row in 1..5 && column in 1..5
+        ) {
+            val intent = Intent(
+                WolfAccessibilityService.ACTION_TAP_CELL
+            ).setPackage(packageName).apply {
+                putExtra(WolfAccessibilityService.EXTRA_ROW, row)
+                putExtra(WolfAccessibilityService.EXTRA_COLUMN, column)
+            }
+
+            sendBroadcast(intent)
+            addMessage(
+                "🐺 تم إرسال أمر النقر على الصف $row والعمود $column.",
+                false
+            )
+            return true
+        }
+    }
+
+    return false
+}
+
     private fun createRoot(): LinearLayout {
         val horizontal = dp(16)
         val vertical = dp(10)
