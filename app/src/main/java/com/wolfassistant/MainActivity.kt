@@ -1384,15 +1384,16 @@ requestInProgress = true
         stopSingleListening()
         tts?.stop()
         tts?.shutdown()
+if (receiverRegistered) {
+    try {
+        unregisterReceiver(voiceReceiver)
+        unregisterReceiver(screenReceiver)
+    } catch (_: Exception) {
+    }
 
-        if (receiverRegistered) {
-            try {
-                unregisterReceiver(voiceReceiver)
-            } catch (_: Exception) {
-            }
-
-            receiverRegistered = false
-        }
+    receiverRegistered = false
+}
+    
 networkExecutor.shutdownNow()
         super.onDestroy()
     }
