@@ -94,7 +94,66 @@ private val backendUrl =
     
         }
     }
+private val screenReceiver = object : BroadcastReceiver() {
+    override fun onReceive(context: Context?, intent: Intent?) {
+        if (
+            intent?.action !=
+            WolfAccessibilityService.ACTION_SCREEN_CAPTURED
+        ) return
 
+        val path = intent.getStringExtra(
+            WolfAccessibilityService.EXTRA_SCREEN_PATH
+        ) ?: return
+
+        showCapturedScreenshot(path)
+    }
+}
+
+private fun showCapturedScreenshot(path: String) {
+    networkExecutor.execute {
+        val bitmap = BitmapFactory.decodeFile(path)
+
+        mainHandler.post {
+            if (bitmap == null) {
+                setStatus("تعذر فتح صورة الشاشة")
+                return@post
+            }
+
+            if (
+                isFinishing ||
+                isDestroyed ||
+                !chatScreenOpen ||
+                !::messages.isInitialized
+            ) {
+                bitmap.recycle()
+                return@post
+            }
+
+            addMessage("🐺 تم التقاط صورة الشاشة:", false)
+
+            val preview = ImageView(this).apply {
+                setImageBitmap(bitmap)
+                adjustViewBounds = true
+                maxHeight = dp(360)
+                scaleType = ImageView.ScaleType.FIT_CENTER
+            }
+
+            messages.addView(
+                preview,
+                LinearLayout.LayoutParams(
+                    -1,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    setMargins(0, dp(5), 0, dp(10))
+                }
+            )
+
+            scroll.post {
+                scroll.fullScroll(View.FOCUS_DOWN)
+            }
+        }
+    }
+}
     private fun dp(value: Int): Int =
         (value * resources.displayMetrics.density).toInt()
 
