@@ -157,7 +157,6 @@ class WolfAccessibilityService : AccessibilityService() {
                                     false
                                 )
 
-                                hardwareBitmap.recycle()
 
                                 if (bitmap != null) {
                                     saveScreenshot(bitmap)
