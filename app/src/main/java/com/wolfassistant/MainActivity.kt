@@ -215,19 +215,34 @@ private fun showCapturedScreenshot(path: String) {
     }
 
     private fun registerVoiceReceiver() {
-        if (receiverRegistered) return
+    if (receiverRegistered) return
 
-        val filter = IntentFilter("com.wolfassistant.VOICE_RESULT")
+    val filter = IntentFilter("com.wolfassistant.VOICE_RESULT")
 
-        if (Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(voiceReceiver, filter, RECEIVER_NOT_EXPORTED)
-        } else {
-            @Suppress("DEPRECATION")
-            registerReceiver(voiceReceiver, filter)
-        }
-
-        receiverRegistered = true
+    if (Build.VERSION.SDK_INT >= 33) {
+        registerReceiver(voiceReceiver, filter, RECEIVER_NOT_EXPORTED)
+    } else {
+        @Suppress("DEPRECATION")
+        registerReceiver(voiceReceiver, filter)
     }
+
+    val screenFilter = IntentFilter(
+        WolfAccessibilityService.ACTION_SCREEN_CAPTURED
+    )
+
+    if (Build.VERSION.SDK_INT >= 33) {
+        registerReceiver(
+            screenReceiver,
+            screenFilter,
+            RECEIVER_NOT_EXPORTED
+        )
+    } else {
+        @Suppress("DEPRECATION")
+        registerReceiver(screenReceiver, screenFilter)
+    }
+
+    receiverRegistered = true
+}
 
 private fun sendWolfAccessibilityCommand(action: String) {
     val intent = Intent(action).setPackage(packageName)
