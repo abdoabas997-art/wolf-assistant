@@ -967,26 +967,27 @@ private fun handleLocalVoiceCommand(spokenText: String): Boolean {
                         setStatus("جارٍ فهم كلامك...")
                     }
 
-                    override fun onResults(results: Bundle?) {
-                        val spoken = results
-                            ?.getStringArrayList(
-                                SpeechRecognizer.RESULTS_RECOGNITION
-                            )
-                            ?.firstOrNull()
+                     override fun onResults(results: Bundle?) {
+    val spoken = results
+        ?.getStringArrayList(
+            SpeechRecognizer.RESULTS_RECOGNITION
+        )
+        ?.firstOrNull()
 
-                        if (!spoken.isNullOrBlank() && chatScreenOpen) {
-    if (!handleLocalVoiceCommand(spoken)) {
-        input.setText(spoken)
-        input.setSelection(input.text.length)
-        sendMessage()
+    if (!spoken.isNullOrBlank() && chatScreenOpen) {
+        if (!handleLocalVoiceCommand(spoken)) {
+            input.setText(spoken)
+            input.setSelection(input.text.length)
+            sendMessage()
+        }
+    } else {
+        setStatus("لم أتعرف على الكلام")
     }
-} else {
-    setStatus("لم أتعرف على الكلام")
+
+    stopSingleListening()
+                     }
 }
                         }
-
-                        stopSingleListening()
-                    }
 
                     override fun onError(error: Int) {
                         setStatus("لم أتعرف على الكلام، حاول مرة أخرى")
