@@ -975,11 +975,14 @@ private fun handleLocalVoiceCommand(spokenText: String): Boolean {
                             ?.firstOrNull()
 
                         if (!spoken.isNullOrBlank() && chatScreenOpen) {
-                            input.setText(spoken)
-                            input.setSelection(input.text.length)
-                            sendMessage()
-                        } else {
-                            setStatus("لم أتعرف على الكلام")
+    if (!handleLocalVoiceCommand(spoken)) {
+        input.setText(spoken)
+        input.setSelection(input.text.length)
+        sendMessage()
+    }
+} else {
+    setStatus("لم أتعرف على الكلام")
+}
                         }
 
                         stopSingleListening()
