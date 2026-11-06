@@ -1,4 +1,3 @@
-
 package com.wolfassistant
 
 import android.accessibilityservice.AccessibilityService
