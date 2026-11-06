@@ -1257,13 +1257,104 @@ requestInProgress = true
 }
 
     private fun speak(text: String) {
-        tts?.speak(
-            text,
-            TextToSpeech.QUEUE_FLUSH,
-            null,
-            "wolf-reply"
-        )
+    if (text.isBlank()) return
+
+    if (continuousListening) {
+        try {
+            startService(
+                Intent(
+                    this,
+                    VoiceAssistantService::class.java
+                ).setAction(
+                    VoiceAssistantService.ACTION_PAUSE
+                )
+            )
+        } catch (e: Exception) {
+            android.util.Log.e(
+                "WolfAssistant",
+                "Unable to pause microphone",
+                e
+            )
+        }
     }
+
+    val engine = tts ?: return
+
+    engine.setOnUtteranceProgressListener(
+        object : UtteranceProgressListener() {
+
+            private fun resumeMicrophone() {
+                mainHandler.postDelayed({
+                    if (
+                        continuousListening &&
+                        !isFinishing &&
+                        !isDestroyed
+                    ) {
+                        try {
+                            startService(
+                                Intent(
+                                    this@MainActivity,
+                                    VoiceAssistantService::class.java
+                                ).setAction(
+                                    VoiceAssistantService.ACTION_RESUME
+                                )
+                            )
+                        } catch (e: Exception) {
+                            android.util.Log.e(
+                                "WolfAssistant",
+                                "Unable to resume microphone",
+                                e
+                            )
+                        }
+                    }
+                }, 800)
+            }
+
+            override fun onStart(utteranceId: String?) {
+            }
+
+            override fun onDone(utteranceId: String?) {
+                resumeMicrophone()
+            }
+
+            override fun onError(utteranceId: String?) {
+                resumeMicrophone()
+            }
+
+            override fun onStop(
+                utteranceId: String?,
+                interrupted: Boolean
+            ) {
+                resumeMicrophone()
+            }
+        }
+    )
+
+    val result = engine.speak(
+        text,
+        TextToSpeech.QUEUE_FLUSH,
+        null,
+        "wolf-reply"
+    )
+
+    if (result == TextToSpeech.ERROR) {
+        if (continuousListening) {
+            mainHandler.postDelayed({
+                try {
+                    startService(
+                        Intent(
+                            this,
+                            VoiceAssistantService::class.java
+                        ).setAction(
+                            VoiceAssistantService.ACTION_RESUME
+                        )
+                    )
+                } catch (_: Exception) {
+                }
+            }, 800)
+        }
+    }
+}
 
     private fun setStatus(text: String) {
         if (chatScreenOpen && ::status.isInitialized) {
