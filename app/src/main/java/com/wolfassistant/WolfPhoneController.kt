@@ -1,15 +1,13 @@
-
 package com.wolfassistant
 
-import android.accessibilityservice.AccessibilityService
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.provider.Settings
 import android.util.Log
 
 /**
- * المركز الموحد لأوامر التحكم في الهاتف.
- * يوجّه الأوامر إلى خدمات Android المناسبة.
+ * المركز الموحد لتوجيه أوامر التحكم في الهاتف.
  */
 object WolfPhoneController {
 
@@ -27,12 +25,6 @@ object WolfPhoneController {
     const val ACTION_TAP_CELL =
         "com.wolfassistant.action.TAP_CELL"
 
-    const val EXTRA_ROW = "row"
-    const val EXTRA_COLUMN = "column"
-
-    /**
-     * إرسال أمر إلى خدمة التحكم بالشاشة.
-     */
     fun execute(
         context: Context,
         action: String,
@@ -40,11 +32,8 @@ object WolfPhoneController {
         column: Int? = null
     ): Boolean {
 
-        val accessibilityService =
-            getAccessibilityService()
-
-        if (accessibilityService == null) {
-            Log.w(TAG, "Accessibility service is not connected")
+        if (!isAccessibilityEnabled(context)) {
+            Log.w(TAG, "Accessibility service is disabled")
             return false
         }
 
@@ -76,23 +65,25 @@ object WolfPhoneController {
         }
 
         return try {
-            val intent = Intent(serviceAction).setPackage(
-                context.packageName
-            )
+            val intent = Intent(serviceAction).apply {
+                setPackage(context.packageName)
 
-            if (action == ACTION_TAP_CELL) {
-                intent.putExtra(
-                    WolfAccessibilityService.EXTRA_ROW,
-                    row!!
-                )
+                if (action == ACTION_TAP_CELL) {
+                    putExtra(
+                        WolfAccessibilityService.EXTRA_ROW,
+                        row!!
+                    )
 
-                intent.putExtra(
-                    WolfAccessibilityService.EXTRA_COLUMN,
-                    column!!
-                )
+                    putExtra(
+                        WolfAccessibilityService.EXTRA_COLUMN,
+                        column!!
+                    )
+                }
             }
 
             context.sendBroadcast(intent)
+
+            Log.i(TAG, "Command dispatched: $action")
             true
 
         } catch (e: Exception) {
@@ -101,21 +92,24 @@ object WolfPhoneController {
         }
     }
 
-    /**
-     * التحقق من تفعيل خدمة إمكانية الوصول.
-     */
     fun isAccessibilityEnabled(context: Context): Boolean {
         return try {
-            val enabledServices =
-                Settings.Secure.getString(
-                    context.contentResolver,
-                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-                ) ?: return false
+            val expectedComponent = ComponentName(
+                context,
+                WolfAccessibilityService::class.java
+            ).flattenToString()
 
-            enabledServices.contains(
-                context.packageName,
-                ignoreCase = true
-            )
+            val enabledServices = Settings.Secure.getString(
+                context.contentResolver,
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+            ) ?: return false
+
+            enabledServices.split(":").any {
+                it.equals(
+                    expectedComponent,
+                    ignoreCase = true
+                )
+            }
 
         } catch (e: Exception) {
             Log.e(TAG, "Accessibility check failed", e)
@@ -123,25 +117,18 @@ object WolfPhoneController {
         }
     }
 
-    /**
-     * فتح إعدادات إمكانية الوصول ليقوم المستخدم
-     * بتفعيل خدمة الذئب بنفسه.
-     */
     fun openAccessibilitySettings(context: Context) {
-        val intent = Intent(
-            Settings.ACTION_ACCESSIBILITY_SETTINGS
-        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            val intent = Intent(
+                Settings.ACTION_ACCESSIBILITY_SETTINGS
+            ).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
 
-        context.startActivity(intent)
-    }
+            context.startActivity(intent)
 
-    /**
-     * نقطة الربط مع خدمة التحكم بالشاشة.
-     * سنربطها بالخدمة في الخطوة التالية.
-     */
-    private fun getAccessibilityService():
-        AccessibilityService? {
-
-        return WolfAccessibilityService.instance
+        } catch (e: Exception) {
+            Log.e(TAG, "Unable to open accessibility settings", e)
+        }
     }
 }
