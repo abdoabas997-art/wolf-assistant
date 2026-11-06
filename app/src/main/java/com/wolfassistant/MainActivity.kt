@@ -79,22 +79,26 @@ private val backendUrl =
         android.window.OnBackInvokedCallback? = null
 
     private val voiceReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action != "com.wolfassistant.VOICE_RESULT") return
+    override fun onReceive(context: Context?, intent: Intent?) {
+        if (intent?.action != "com.wolfassistant.VOICE_RESULT") return
 
-            val spoken = intent.getStringExtra("spoken_text")
-            if (!spoken.isNullOrBlank() && chatScreenOpen) {
-    if (handleLocalVoiceCommand(spoken)) {
-        return
-    }
+        val spoken = intent.getStringExtra("spoken_text")
 
-    input.setText(spoken)
-    input.setSelection(input.text.length)
-    sendMessage()
-}
-    
+        if (spoken.isNullOrBlank()) return
+
+        // تنفيذ الأوامر المحلية حتى خارج نافذة المحادثة.
+        if (handleLocalVoiceCommand(spoken)) {
+            return
+        }
+
+        // إرسال الكلام إلى الذكاء الاصطناعي إذا كانت المحادثة مفتوحة.
+        if (chatScreenOpen && ::input.isInitialized) {
+            input.setText(spoken)
+            input.setSelection(input.text.length)
+            sendMessage()
         }
     }
+}
 private val screenReceiver = object : BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
         if (
