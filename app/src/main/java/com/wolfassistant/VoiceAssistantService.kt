@@ -1,3 +1,4 @@
+
 package com.wolfassistant
 
 import android.app.Notification
@@ -23,6 +24,12 @@ class VoiceAssistantService : Service() {
         const val ACTION_STOP =
             "com.wolfassistant.action.STOP_VOICE"
 
+        const val ACTION_PAUSE =
+            "com.wolfassistant.action.PAUSE_VOICE"
+
+        const val ACTION_RESUME =
+            "com.wolfassistant.action.RESUME_VOICE"
+
         private const val CHANNEL_ID = "wolf_voice_channel"
         private const val NOTIFICATION_ID = 1001
         private const val TAG = "WolfVoiceService"
@@ -31,6 +38,7 @@ class VoiceAssistantService : Service() {
     private var recognizer: SpeechRecognizer? = null
     private var listening = false
     private var stopping = false
+    private var paused = false
 
     override fun onCreate() {
         super.onCreate()
@@ -42,16 +50,33 @@ class VoiceAssistantService : Service() {
         flags: Int,
         startId: Int
     ): Int {
+
         when (intent?.action) {
+
             ACTION_STOP -> {
                 stopVoiceService()
                 return START_NOT_STICKY
             }
 
+            ACTION_PAUSE -> {
+                pauseListening()
+                return START_NOT_STICKY
+            }
+
+            ACTION_RESUME -> {
+                if (!stopping) {
+                    paused = false
+                    startRecognition()
+                }
+                return START_NOT_STICKY
+            }
+
             ACTION_START -> {
                 stopping = false
+                paused = false
 
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+                if (
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
                     checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
                     PackageManager.PERMISSION_GRANTED
                 ) {
@@ -142,8 +167,24 @@ class VoiceAssistantService : Service() {
             .build()
     }
 
+    // إيقاف الميكروفون مؤقتًا مع إبقاء الخدمة والإشعار قائمين.
+    private fun pauseListening() {
+        paused = true
+        listening = false
+
+        try {
+            recognizer?.cancel()
+            recognizer?.destroy()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error pausing recognition", e)
+        }
+
+        recognizer = null
+        Log.i(TAG, "Listening paused")
+    }
+
     private fun startRecognition() {
-        if (stopping || listening) return
+        if (stopping || paused || listening) return
 
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
             Log.w(TAG, "Speech recognition is unavailable")
@@ -158,12 +199,14 @@ class VoiceAssistantService : Service() {
             recognizer?.setRecognitionListener(
                 object : RecognitionListener {
 
-                    override fun onReadyForSpeech(params: android.os.Bundle?) {
-                        listening = true
+                    override fun onReadyForSpeech(
+                        params: android.os.Bundle?
+                    ) {
+                        if (!paused) listening = true
                     }
 
                     override fun onBeginningOfSpeech() {
-                        listening = true
+                        if (!paused) listening = true
                     }
 
                     override fun onEndOfSpeech() {
@@ -175,14 +218,15 @@ class VoiceAssistantService : Service() {
                     ) {
                         listening = false
 
+                        if (paused || stopping) return
+
                         val spoken = results?.getStringArrayList(
                             SpeechRecognizer.RESULTS_RECOGNITION
                         )?.firstOrNull()
 
                         if (!spoken.isNullOrBlank()) {
-                            Log.i(TAG, "Recognized speech: $spoken")
+                            Log.i(TAG, "Recognized speech")
 
-                            // سنربط النص بالمحادثة في الخطوة التالية.
                             val event = Intent(
                                 "com.wolfassistant.VOICE_RESULT"
                             ).setPackage(packageName)
@@ -237,10 +281,10 @@ class VoiceAssistantService : Service() {
     }
 
     private fun restartRecognition() {
-        if (stopping) return
+        if (stopping || paused) return
 
         android.os.Handler(mainLooper).postDelayed({
-            if (!stopping) {
+            if (!stopping && !paused) {
                 startRecognition()
             }
         }, 1000)
@@ -248,6 +292,7 @@ class VoiceAssistantService : Service() {
 
     private fun stopVoiceService() {
         stopping = true
+        paused = true
         listening = false
 
         try {
@@ -271,6 +316,7 @@ class VoiceAssistantService : Service() {
 
     override fun onDestroy() {
         stopping = true
+        paused = true
 
         try {
             recognizer?.cancel()
