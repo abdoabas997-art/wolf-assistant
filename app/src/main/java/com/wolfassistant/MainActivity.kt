@@ -38,6 +38,9 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
+import android.graphics.BitmapFactory
+import android.widget.ImageView
+import java.io.File
 class MainActivity : Activity() {
 
     private val bg = Color.rgb(15, 20, 32)
